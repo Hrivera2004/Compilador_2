@@ -1,17 +1,20 @@
 package org.example;
 
-//TIP To <b>Run</b> code, press <shortcut actionId="Run"/> or
-// click the <icon src="AllIcons.Actions.Execute"/> icon in the gutter.
+import org.antlr.v4.runtime.*;
+import org.antlr.v4.runtime.tree.*;
+import org.example.parser.*;
+
 public class Main {
     public static void main(String[] args) {
-        //TIP Press <shortcut actionId="ShowIntentionActions"/> with your caret at the highlighted text
-        // to see how IntelliJ IDEA suggests fixing it.
-        System.out.printf("Hello and welcome!");
+        CharStream inputStream = CharStreams.fromString(" int main( void )\n" +
+                    "{\n" +
+                    "    return 0;\n" +
+                    "}");
+        MicroCLexer lexer= new MicroCLexer(inputStream);
+        MicroCParser parser = new MicroCParser(new CommonTokenStream(lexer));
 
-        for (int i = 1; i <= 5; i++) {
-            //TIP Press <shortcut actionId="Debug"/> to start debugging your code. We have set one <icon src="AllIcons.Debugger.Db_set_breakpoint"/> breakpoint
-            // for you, but you can always add more by pressing <shortcut actionId="ToggleLineBreakpoint"/>.
-            System.out.println("i = " + i);
-        }
+        ParseTree tree = parser.program();
+        System.out.println("Sin errores de sintaxis.");
+        System.out.println(tree.toStringTree(parser));
     }
 }

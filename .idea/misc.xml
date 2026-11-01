@@ -1,5 +1,41 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
+  <component name="ANTLRGenerationPreferences">
+    <option name="perGrammarGenerationSettings">
+      <list>
+        <PerGrammarGenerationSettings>
+          <option name="fileName" value="$PROJECT_DIR$/ANTLR4/gramatica.g4" />
+          <option name="autoGen" value="true" />
+          <option name="outputDir" value="C:\Users\hriverav\IdeaProjects\Compiladores_2\src\main\java\org\example" />
+          <option name="libDir" value="C:\Users\hriverav\IdeaProjects\Compiladores_2\ANTLR4" />
+          <option name="encoding" value="" />
+          <option name="pkg" value="" />
+          <option name="language" value="Java" />
+          <option name="generateVisitor" value="true" />
+        </PerGrammarGenerationSettings>
+        <PerGrammarGenerationSettings>
+          <option name="fileName" value="$PROJECT_DIR$/ANTLR4/MicroC.g4" />
+          <option name="autoGen" value="true" />
+          <option name="outputDir" value="C:\Users\hriverav\IdeaProjects\Compiladores_2\src\main\java\ANTLR" />
+          <option name="libDir" value="C:\Users\hriverav\IdeaProjects\Compiladores_2\ANTLR4" />
+          <option name="encoding" value="" />
+          <option name="pkg" value="" />
+          <option name="language" value="Java" />
+          <option name="generateVisitor" value="true" />
+        </PerGrammarGenerationSettings>
+        <PerGrammarGenerationSettings>
+          <option name="fileName" value="$PROJECT_DIR$/src/main/antlr4/org/example/parser/MicroC.g4" />
+          <option name="autoGen" value="true" />
+          <option name="outputDir" value="" />
+          <option name="libDir" value="" />
+          <option name="encoding" value="" />
+          <option name="pkg" value="" />
+          <option name="language" value="Java" />
+          <option name="generateVisitor" value="true" />
+        </PerGrammarGenerationSettings>
+      </list>
+    </option>
+  </component>
   <component name="ExternalStorageConfigurationManager" enabled="true" />
   <component name="MavenProjectsManager">
     <option name="originalFiles">

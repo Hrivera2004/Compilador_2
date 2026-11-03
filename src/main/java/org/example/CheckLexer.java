@@ -24,7 +24,6 @@ public class CheckLexer extends MicroCBaseVisitor<Void> {
         String texto = ctx.getText();
         Boolean esHex = texto.startsWith("0x");
         long valor = 0;
-
         try {
             valor = esHex? Long.parseLong(texto.substring(2),16) : Long.parseLong(texto);
         } catch (NumberFormatException e){
@@ -44,11 +43,5 @@ public class CheckLexer extends MicroCBaseVisitor<Void> {
     private void error(Token t, String mensaje) {
         throw new ErrorSemantico("Error semántico en línea " + t.getLine()
                 + ", columna " + (t.getCharPositionInLine() + 1) + ": " + mensaje);
-    }
-
-    public static class ErrorSemantico extends RuntimeException {
-        public ErrorSemantico(String mensaje) {
-            super(mensaje);
-        }
     }
 }

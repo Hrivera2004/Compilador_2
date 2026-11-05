@@ -133,6 +133,8 @@ public class Semantico extends MicroCBaseVisitor<Void> {
         String primerElemento = ctx.getChild(0).getText();
 
         if ("while".equals(primerElemento)) {
+            validarCondicion(ctx.expression());
+
             visit(ctx.expression());
 
             ciclosActivos++;
@@ -143,6 +145,12 @@ public class Semantico extends MicroCBaseVisitor<Void> {
             }
 
             return null;
+        }
+
+        if ("if".equals(primerElemento)) {
+            validarCondicion(ctx.expression());
+
+            return visitChildren(ctx);
         }
 
         if ("break".equals(primerElemento)) {
@@ -463,24 +471,27 @@ public class Semantico extends MicroCBaseVisitor<Void> {
         return izquierdo;
     }
 
-    private Tipo tipoDeEquality(
-            MicroCParser.Equality_expressionContext ctx) {
-
+    private Tipo tipoDeEquality(MicroCParser.Equality_expressionContext ctx) {
         if (ctx.eq_op() == null) {
             return tipoDeRelational(ctx.relational_expression(0));
         }
 
-        return Tipo.Entero;
+        Tipo izquierdo = tipoDeRelational(ctx.relational_expression(0));
+        Tipo derecho = tipoDeRelational(ctx.relational_expression(1));
+
+        return operarComparacion(izquierdo, derecho, ctx.eq_op().getStart());
     }
 
-    private Tipo tipoDeRelational(
-            MicroCParser.Relational_expressionContext ctx) {
+    private Tipo tipoDeRelational(MicroCParser.Relational_expressionContext ctx) {
 
         if (ctx.rel_op() == null) {
             return tipoDeSimple(ctx.simple_expression(0));
         }
 
-        return Tipo.Entero;
+        Tipo izquierdo = tipoDeSimple(ctx.simple_expression(0));
+        Tipo derecho = tipoDeSimple(ctx.simple_expression(1));
+
+        return operarComparacion(izquierdo, derecho, ctx.rel_op().getStart());
     }
 
     private Tipo tipoDeSimple(
@@ -600,5 +611,28 @@ public class Semantico extends MicroCBaseVisitor<Void> {
         }
 
         return Tipo.Entero;
+    }
+
+    private Tipo operarComparacion(Tipo izquierdo, Tipo derecho, Token operador) {
+        boolean comparable = izquierdo == Tipo.Entero
+                        || izquierdo == Tipo.Caracter;
+
+        if (!comparable || izquierdo != derecho) {
+            error(operador,
+                    "el operador '" + operador.getText()
+                            + "' solo compara operandos del mismo tipo (Entero o Caracter), pero recibió "
+                            + izquierdo + " y " + derecho);
+        }
+
+        return Tipo.Entero;
+    }
+
+    private void validarCondicion(MicroCParser.ExpressionContext ctx) {
+        Tipo tipo = tipoDeExpresion(ctx);
+
+        if (tipo != Tipo.Entero && tipo != Tipo.Caracter) {
+            error(ctx.getStart(),
+                    "la condición debe ser de tipo Entero o Caracter, pero recibió " + tipo);
+        }
     }
 }

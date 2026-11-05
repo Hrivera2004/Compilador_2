@@ -127,7 +127,9 @@ public class frontend extends JFrame {
         MicroCParser parser = new MicroCParser(new CommonTokenStream(lexer));
 
         ParseTree tree = parser.program();
-        System.out.println("Sin errores de sintaxis.");
+        new CheckLexer().visit(tree);
+        new Semantico().visit(tree);
+        System.out.println("Sin errores léxicos, sintácticos ni semánticos.");
         System.out.println(tree.toStringTree(parser));
         System.out.println(codigo);
 

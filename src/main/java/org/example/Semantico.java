@@ -13,6 +13,8 @@ public class Semantico extends MicroCBaseVisitor<Void> {
 
     private int ciclosActivos = 0;
 
+    private Tipo retornoActual = Tipo.Error;
+
     private final Set<String> funcionesDefinidas = new HashSet<>();
 
     @Override
@@ -24,6 +26,10 @@ public class Semantico extends MicroCBaseVisitor<Void> {
                 obtenerTiposParametros(ctx.function_def_header().parameters_def()),
                 true
         );
+        Tipo retornoAnterior = retornoActual;
+        retornoActual = obtenerTipoRetorno(
+                ctx.function_def_header().return_type()
+        );
         tabla.entrarAmbito();
 
         try {
@@ -31,6 +37,7 @@ public class Semantico extends MicroCBaseVisitor<Void> {
             visit(ctx.function_body());
         } finally {
             tabla.salirAmbito();
+            retornoActual = retornoAnterior;
         }
         return null;
     }
@@ -77,7 +84,7 @@ public class Semantico extends MicroCBaseVisitor<Void> {
     }
 
     private void error(Token token, String mensaje) {
-        throw new CheckLexer.ErrorSemantico(
+        throw new ErrorSemantico(
                 "Error semántico en línea " + token.getLine()
                         + ", columna " + (token.getCharPositionInLine() + 1)
                         + ": " + mensaje
@@ -147,6 +154,35 @@ public class Semantico extends MicroCBaseVisitor<Void> {
                         "'continue' solo puede utilizarse dentro de un while");
             }
             return null;
+        }
+
+        if ("return".equals(primerElemento)) {
+            if (ctx.expression() == null) {
+                if (retornoActual != Tipo.Void) {
+                    error(ctx.getStart(),
+                            "la función debe retornar un valor de tipo "
+                                    + retornoActual);
+                }
+            } else {
+                Tipo devuelto = tipoDeExpresion(ctx.expression());
+
+                if (retornoActual == Tipo.Void) {
+                    error(ctx.getStart(),
+                            "una función void no puede retornar un valor");
+                }
+
+                if (retornoActual != devuelto) {
+                    error(ctx.getStart(),
+                            "el return debe ser de tipo " + retornoActual
+                                    + ", pero recibió " + devuelto);
+                }
+            }
+
+            return visitChildren(ctx);
+        }
+
+        if (ctx.expression() != null) {
+            tipoDeExpresion(ctx.expression());
         }
 
         return visitChildren(ctx);
@@ -344,6 +380,18 @@ public class Semantico extends MicroCBaseVisitor<Void> {
                             + " argumento(s), pero recibió "
                             + argumentos.size());
         }
+        for (int i = 0; i < argumentos.size(); i++) {
+            Tipo esperado = simbolo.tiposParametros().get(i);
+            Tipo recibido = tipoDeExpresion(argumentos.get(i));
+
+            if (esperado != recibido) {
+                error(id.getStart(),
+                        "el argumento " + (i + 1)
+                                + " de '" + id.getText()
+                                + "' debe ser de tipo " + esperado
+                                + ", pero recibió " + recibido);
+            }
+        }
 
         return visitChildren(ctx);
     }
@@ -382,5 +430,170 @@ public class Semantico extends MicroCBaseVisitor<Void> {
         }
 
         return Tipo.Error;
+    }
+
+    private Tipo tipoDeExpresion(
+            MicroCParser.ExpressionContext ctx) {
+
+        Tipo izquierdo = tipoDeEquality(ctx.equality_expression(0));
+
+        if (ctx.equality_expression().size() == 1) {
+            return izquierdo;
+        }
+
+        if (!esAsignable(ctx.equality_expression(0))) {
+            error(ctx.getStart(),
+                    "el lado izquierdo de una asignación debe ser una variable");
+        }
+
+        Tipo derecho = tipoDeEquality(ctx.equality_expression(1));
+
+        if (izquierdo != derecho) {
+            error(ctx.getStart(),
+                    "no se puede asignar un valor de tipo "
+                            + derecho + " a una expresión de tipo "
+                            + izquierdo);
+        }
+
+        return izquierdo;
+    }
+
+    private Tipo tipoDeEquality(
+            MicroCParser.Equality_expressionContext ctx) {
+
+        if (ctx.eq_op() == null) {
+            return tipoDeRelational(ctx.relational_expression(0));
+        }
+
+        return Tipo.Entero;
+    }
+
+    private Tipo tipoDeRelational(
+            MicroCParser.Relational_expressionContext ctx) {
+
+        if (ctx.rel_op() == null) {
+            return tipoDeSimple(ctx.simple_expression(0));
+        }
+
+        return Tipo.Entero;
+    }
+
+    private Tipo tipoDeSimple(
+            MicroCParser.Simple_expressionContext ctx) {
+
+        if (ctx.add_op() == null) {
+            return tipoDeTerm(ctx.term());
+        }
+
+        Tipo izquierdo = tipoDeSimple(ctx.simple_expression());
+        Tipo derecho = tipoDeTerm(ctx.term());
+
+        return operarAritmetica(
+                izquierdo,
+                derecho,
+                ctx.add_op().getStart()
+        );
+    }
+
+    private Tipo tipoDeTerm(
+            MicroCParser.TermContext ctx) {
+
+        if (ctx.mul_op() == null) {
+            return tipoDeFactor(ctx.factor());
+        }
+
+        Tipo izquierdo = tipoDeTerm(ctx.term());
+        Tipo derecho = tipoDeFactor(ctx.factor());
+
+        return operarAritmetica(
+                izquierdo,
+                derecho,
+                ctx.mul_op().getStart()
+        );
+    }
+
+    private Tipo tipoDeFactor(
+            MicroCParser.FactorContext ctx) {
+
+        if (ctx.constant() != null) {
+            return obtenerTipoConstante(ctx.constant());
+        }
+
+        if (ctx.identifier() != null) {
+            Simbolo simbolo = tabla.resolver(ctx.identifier().getText());
+
+            if (simbolo == null) {
+                error(ctx.identifier().getStart(),
+                        "el identificador '" + ctx.identifier().getText()
+                                + "' no ha sido declarado");
+            }
+
+            return simbolo.tipo();
+        }
+
+        if (ctx.expression() != null) {
+            return tipoDeExpresion(ctx.expression());
+        }
+
+        if (ctx.factor() != null) {
+            Tipo tipo = tipoDeFactor(ctx.factor());
+
+            if (ctx.add_op() != null && tipo != Tipo.Entero) {
+                error(ctx.add_op().getStart(),
+                        "el operador '" + ctx.add_op().getText()
+                                + "' solo acepta un operando de tipo Entero");
+            }
+
+            return tipo;
+        }
+
+        return Tipo.Error;
+    }
+
+    private boolean esAsignable(
+            MicroCParser.Equality_expressionContext ctx) {
+
+        if (ctx.eq_op() != null) {
+            return false;
+        }
+
+        MicroCParser.Relational_expressionContext relacional =
+                ctx.relational_expression(0);
+
+        if (relacional.rel_op() != null) {
+            return false;
+        }
+
+        MicroCParser.Simple_expressionContext simple =
+                relacional.simple_expression(0);
+
+        if (simple.add_op() != null) {
+            return false;
+        }
+
+        MicroCParser.TermContext termino = simple.term();
+
+        if (termino.mul_op() != null) {
+            return false;
+        }
+
+        MicroCParser.FactorContext factor = termino.factor();
+
+        return factor.identifier() != null
+                && factor.getChildCount() == 1;
+    }
+
+    private Tipo operarAritmetica(
+            Tipo izquierdo,
+            Tipo derecho,
+            Token operador) {
+
+        if (izquierdo != Tipo.Entero || derecho != Tipo.Entero) {
+            error(operador,
+                    "el operador '" + operador.getText()
+                            + "' solo acepta operandos de tipo Entero");
+        }
+
+        return Tipo.Entero;
     }
 }

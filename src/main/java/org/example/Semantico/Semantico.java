@@ -1,6 +1,11 @@
-package org.example;
+package org.example.Semantico;
 
 import org.antlr.v4.runtime.Token;
+import org.example.TablaSymbolos.ClaseSimbolo;
+import org.example.TablaSymbolos.Simbolo;
+import org.example.TablaSymbolos.TablaSimbolos;
+import org.example.TablaSymbolos.Tipo;
+import org.example.errores.ErrorSemantico;
 import org.example.parser.MicroCBaseVisitor;
 import org.example.parser.MicroCParser;
 import java.util.ArrayList;

@@ -1,4 +1,4 @@
-package org.example;
+package org.example.TablaSymbolos;
 
 import org.antlr.v4.runtime.Token;
 import java.util.List;
@@ -13,7 +13,6 @@ public record Simbolo(
     public Simbolo {
         tiposParametros = List.copyOf(tiposParametros);
     }
-
     public boolean esFuncion() {
         return clase == ClaseSimbolo.Funcion;
     }

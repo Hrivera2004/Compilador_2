@@ -1,4 +1,4 @@
-package org.example;
+package org.example.TablaSymbolos;
 
 public enum ClaseSimbolo {
     Variable,

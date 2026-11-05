@@ -4,6 +4,9 @@ import org.antlr.v4.runtime.CharStream;
 import org.antlr.v4.runtime.CharStreams;
 import org.antlr.v4.runtime.CommonTokenStream;
 import org.antlr.v4.runtime.tree.ParseTree;
+import org.example.Semantico.CheckLexer;
+import org.example.Semantico.Semantico;
+import org.example.errores.EscuchaErrores;
 import org.example.parser.MicroCLexer;
 import org.example.parser.MicroCParser;
 
@@ -27,15 +30,7 @@ import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
-import javax.swing.UIManager;
 import javax.swing.filechooser.FileNameExtensionFilter;
-
-/**
- * GUI mínima para el compilador Micro-C:
- * - un botón para cargar un archivo
- * - un área que muestra todo lo que el compilador imprime en consola
- *   (System.out y System.err se redirigen aquí)
- */
 public class frontend extends JFrame {
 
     private final JTextArea consola = new JTextArea();
@@ -123,12 +118,22 @@ public class frontend extends JFrame {
         System.out.println("Compilando " + archivo.getName() + "...\n");
 
         CharStream inputStream = CharStreams.fromString(codigo);
+        EscuchaErrores escucha = new EscuchaErrores();
+
+        //se crea el lexer con un error listener
         MicroCLexer lexer= new MicroCLexer(inputStream);
+        lexer.removeErrorListeners();
+        lexer.addErrorListener(escucha);
+
+        //se crea el parser con un error listener
         MicroCParser parser = new MicroCParser(new CommonTokenStream(lexer));
+        parser.removeErrorListeners();
+        parser.addErrorListener(escucha);
 
         ParseTree tree = parser.program();
         new CheckLexer().visit(tree);
         new Semantico().visit(tree);
+
         System.out.println("Sin errores léxicos, sintácticos ni semánticos.");
         System.out.println(tree.toStringTree(parser));
         System.out.println(codigo);

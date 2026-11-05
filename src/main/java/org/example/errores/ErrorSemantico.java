@@ -1,4 +1,4 @@
-package org.example;
+package org.example.errores;
 
 public class ErrorSemantico extends RuntimeException {
     public ErrorSemantico(String mensaje) {

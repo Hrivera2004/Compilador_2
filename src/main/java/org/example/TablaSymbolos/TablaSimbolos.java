@@ -1,4 +1,4 @@
-package org.example;
+package org.example.TablaSymbolos;
 
 import java.util.ArrayDeque;
 import java.util.Deque;

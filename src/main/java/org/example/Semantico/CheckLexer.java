@@ -1,6 +1,7 @@
-package org.example;
+package org.example.Semantico;
 
 import org.antlr.v4.runtime.Token;
+import org.example.errores.ErrorSemantico;
 import org.example.parser.MicroCBaseVisitor;
 import org.example.parser.MicroCParser;
 
@@ -16,16 +17,31 @@ public class CheckLexer extends MicroCBaseVisitor<Void> {
     @Override
     public Void visitInteger_constant(MicroCParser.Integer_constantContext ctx) {
         RevisaRango(ctx, false);
-        return null;
+        return visitChildren(ctx);
+    }
+
+    @Override
+    public Void visitFactor(MicroCParser.FactorContext ctx) {
+        MicroCParser.FactorContext interno = ctx.factor();
+        if (ctx.add_op() != null
+                && ctx.add_op().getText().equals("-")
+                && interno.constant() != null
+                && interno.constant().numeric_constant() != null) {
+            RevisaRango(interno.constant().numeric_constant().integer_constant(), true);
+            return null;
+        }
+        return visitChildren(ctx);
     }
 
     //--Ayudantes--
     private void RevisaRango(MicroCParser.Integer_constantContext ctx, boolean negativo){
         String texto = ctx.getText();
-        Boolean esHex = texto.startsWith("0x");
+
+        Boolean esHex = texto.toLowerCase().startsWith("0x");
         long valor = 0;
         try {
             valor = esHex? Long.parseLong(texto.substring(2),16) : Long.parseLong(texto);
+
         } catch (NumberFormatException e){
             String mostrado = (negativo ? "-" : "") + texto;
             error(ctx.getStart(), "la constante " + mostrado + " no cabe en 16 bits"
@@ -41,7 +57,7 @@ public class CheckLexer extends MicroCBaseVisitor<Void> {
     }
 
     private void error(Token t, String mensaje) {
-        throw new ErrorSemantico("Error semántico en línea " + t.getLine()
+        throw new ErrorSemantico("Error léxico en línea " + t.getLine()
                 + ", columna " + (t.getCharPositionInLine() + 1) + ": " + mensaje);
     }
 }

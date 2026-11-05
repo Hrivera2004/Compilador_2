@@ -5,16 +5,25 @@ import org.example.parser.MicroCBaseVisitor;
 import org.example.parser.MicroCParser;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.HashSet;
+import java.util.Set;
 
 public class Semantico extends MicroCBaseVisitor<Void> {
     private final TablaSimbolos tabla = new TablaSimbolos();
 
     private int ciclosActivos = 0;
 
+    private final Set<String> funcionesDefinidas = new HashSet<>();
+
     @Override
     public Void visitFunction_definition(
             MicroCParser.Function_definitionContext ctx ){
-        registrarFuncion(ctx.function_def_header());
+        registrarFuncion(
+                ctx.function_def_header().return_type(),
+                ctx.function_def_header().identifier(),
+                obtenerTiposParametros(ctx.function_def_header().parameters_def()),
+                true
+        );
         tabla.entrarAmbito();
 
         try {
@@ -178,25 +187,200 @@ public class Semantico extends MicroCBaseVisitor<Void> {
     }
 
     private void registrarFuncion(
-            MicroCParser.Function_def_headerContext ctx) {
+            MicroCParser.Return_typeContext retornoCtx,
+            MicroCParser.IdentifierContext id,
+            List<Tipo> parametros,
+            boolean esDefinicion) {
 
-        Tipo retorno = obtenerTipoRetorno(ctx.return_type());
-        List<Tipo> parametros = obtenerTiposParametros(ctx.parameters_def());
+        Tipo retorno = obtenerTipoRetorno(retornoCtx);
+        Simbolo existente = tabla.resolver(id.getText());
 
-        MicroCParser.IdentifierContext id = ctx.identifier();
+        if (existente == null) {
+            Simbolo funcion = new Simbolo(
+                    id.getText(),
+                    retorno,
+                    ClaseSimbolo.Funcion,
+                    parametros,
+                    id.getStart()
+            );
 
-        Simbolo funcion = new Simbolo(
-                id.getText(),
-                retorno,
-                ClaseSimbolo.Funcion,
-                parametros,
-                id.getStart()
-        );
+            tabla.declarar(funcion);
+        } else {
+            if (!existente.esFuncion()) {
+                error(id.getStart(),
+                        "'" + id.getText()
+                                + "' ya fue declarado y no es una función");
+            }
 
-        if (!tabla.declarar(funcion)) {
+            boolean firmaDistinta =
+                    existente.tipo() != retorno
+                            || !existente.tiposParametros().equals(parametros);
+
+            if (firmaDistinta) {
+                error(id.getStart(),
+                        "la función '" + id.getText()
+                                + "' tiene una firma distinta a su prototipo");
+            }
+        }
+
+        if (esDefinicion && !funcionesDefinidas.add(id.getText())) {
             error(id.getStart(),
                     "la función '" + id.getText()
-                            + "' ya fue declarada");
+                            + "' ya fue definida");
         }
+    }
+
+    @Override
+    public Void visitFunction_declaration(
+            MicroCParser.Function_declarationContext ctx) {
+
+        registrarFuncion(
+                ctx.return_type(),
+                ctx.identifier(),
+                obtenerTiposParametros(ctx.parameters_decl()),
+                false
+        );
+
+        return null;
+    }
+
+    private List<Tipo> obtenerTiposParametros(
+            MicroCParser.Parameters_declContext ctx) {
+
+        if (ctx.parameter_decl_list() == null) {
+            return List.of(); // void
+        }
+
+        return obtenerTiposParametros(ctx.parameter_decl_list());
+    }
+
+    private List<Tipo> obtenerTiposParametros(
+            MicroCParser.Parameter_decl_listContext ctx) {
+
+        List<Tipo> tipos = new ArrayList<>();
+
+        if (ctx.parameter_decl_list() != null) {
+            tipos.addAll(obtenerTiposParametros(ctx.parameter_decl_list()));
+        }
+
+        MicroCParser.Parameter_decl_specContext parametro =
+                ctx.parameter_decl_spec();
+
+        tipos.add(obtenerTipo(parametro.type()));
+
+        return tipos;
+    }
+
+    @Override
+    public Void visitProgram(MicroCParser.ProgramContext ctx) {
+        visitChildren(ctx);
+
+        Simbolo main = tabla.resolver("main");
+
+        if (main == null) {
+            error(ctx.getStart(),
+                    "el programa debe declarar una función llamada 'main'");
+        }
+
+        if (!main.esFuncion()) {
+            error(main.declaracion(),
+                    "'main' debe ser una función");
+        }
+
+        if (!main.tiposParametros().isEmpty()) {
+            error(main.declaracion(),
+                    "'main' no debe recibir parámetros");
+        }
+
+        if (!funcionesDefinidas.contains("main")) {
+            error(main.declaracion(),
+                    "'main' debe tener una definición");
+        }
+
+        return null;
+    }
+
+    @Override
+    public Void visitFactor(MicroCParser.FactorContext ctx) {
+        if (ctx.identifier() == null) {
+            return visitChildren(ctx);
+        }
+
+        MicroCParser.IdentifierContext id = ctx.identifier();
+        Simbolo simbolo = tabla.resolver(id.getText());
+
+        if (simbolo == null) {
+            error(id.getStart(),
+                    "el identificador '" + id.getText()
+                            + "' no ha sido declarado");
+        }
+
+        boolean esLlamada =
+                ctx.getChildCount() > 1
+                        && "(".equals(ctx.getChild(1).getText());
+
+        if (!esLlamada) {
+            if (simbolo.esFuncion()) {
+                error(id.getStart(),
+                        "la función '" + id.getText()
+                                + "' debe llamarse usando paréntesis");
+            }
+
+            return visitChildren(ctx);
+        }
+
+        if (!simbolo.esFuncion()) {
+            error(id.getStart(),
+                    "'" + id.getText() + "' no es una función");
+        }
+
+        List<MicroCParser.ExpressionContext> argumentos =
+                obtenerArgumentos(ctx.expression_list());
+
+        if (argumentos.size() != simbolo.tiposParametros().size()) {
+            error(id.getStart(),
+                    "la función '" + id.getText() + "' espera "
+                            + simbolo.tiposParametros().size()
+                            + " argumento(s), pero recibió "
+                            + argumentos.size());
+        }
+
+        return visitChildren(ctx);
+    }
+
+    private List<MicroCParser.ExpressionContext> obtenerArgumentos(
+            MicroCParser.Expression_listContext ctx) {
+
+        if (ctx == null) {
+            return List.of(); // llamada como funcion()
+        }
+
+        List<MicroCParser.ExpressionContext> argumentos = new ArrayList<>();
+
+        if (ctx.expression_list() != null) {
+            argumentos.addAll(obtenerArgumentos(ctx.expression_list()));
+        }
+
+        argumentos.add(ctx.expression());
+
+        return argumentos;
+    }
+
+    private Tipo obtenerTipoConstante(
+            MicroCParser.ConstantContext ctx) {
+
+        if (ctx.numeric_constant() != null) {
+            return Tipo.Entero;
+        }
+
+        if (ctx.char_constant() != null) {
+            return Tipo.Caracter;
+        }
+
+        if (ctx.string_constant() != null) {
+            return Tipo.Cadena;
+        }
+
+        return Tipo.Error;
     }
 }

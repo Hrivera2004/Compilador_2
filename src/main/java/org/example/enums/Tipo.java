@@ -1,4 +1,4 @@
-package org.example.TablaSymbolos;
+package org.example.enums;
 
 public enum Tipo {
     Entero,

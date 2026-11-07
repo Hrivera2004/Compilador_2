@@ -50,6 +50,12 @@ public class Semantico extends MicroCBaseVisitor<Void> {
         tabla.entrarAmbito();
 
         try {
+            String nombre = ctx.function_def_header().identifier().getText();
+            if (retornoActual != Tipo.Void && !nombre.equals("main")
+                    && !siempreRetorna(ctx.function_body().statement_list())) {
+                error(ctx.function_def_header().identifier().getStart(),
+                        "la función '" + nombre + "' no retorna un valor en todas sus rutas");
+            }
             declararParametros(ctx.function_def_header().parameters_def());
             visit(ctx.function_body());
         } finally {
@@ -821,4 +827,24 @@ public class Semantico extends MicroCBaseVisitor<Void> {
         String texto = factor.constant().string_constant().getText();
         return texto.substring(1, texto.length() - 1);   // quita las comillas
     }
+    private boolean siempreRetorna(MicroCParser.Statement_listContext ctx) {
+        if (ctx.statement_list() != null && siempreRetorna(ctx.statement_list()))
+            return true;
+        return siempreRetorna(ctx.statement());
+    }
+
+    private boolean siempreRetorna(MicroCParser.StatementContext ctx) {
+        String primero = ctx.getChild(0).getText();
+        return switch (primero) {
+            case "return" -> true;
+            case "{" -> siempreRetorna(ctx.statement_list());
+            case "if" -> ctx.statement().size() == 2
+                    && siempreRetorna(ctx.statement(0))
+                    && siempreRetorna(ctx.statement(1));
+            default -> false;
+        };
+    }
+
 }
+
+

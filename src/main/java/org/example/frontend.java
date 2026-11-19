@@ -4,6 +4,7 @@ import org.antlr.v4.runtime.CharStream;
 import org.antlr.v4.runtime.CharStreams;
 import org.antlr.v4.runtime.CommonTokenStream;
 import org.antlr.v4.runtime.tree.ParseTree;
+import org.example.Generacion.GeneradorIR;
 import org.example.Semantico.CheckLexer;
 import org.example.Semantico.Semantico;
 import org.example.errores.EscuchaErrores;
@@ -137,6 +138,9 @@ public class frontend extends JFrame {
         System.out.println("Sin errores léxicos, sintácticos ni semánticos.");
         System.out.println(tree.toStringTree(parser));
         System.out.println(codigo);
+
+         String ir = new GeneradorIR().generar(tree);
+        System.out.println(ir);
 
         System.out.println("\n-> Terminado");
     }

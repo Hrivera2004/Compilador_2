@@ -9,14 +9,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-public class GeneradorIR extends MicroCBaseVisitor<String> {
+public class GeneradorIR extends MicroCBaseVisitor<Valor> {
     //Data type
-    private record Valor (String ref, String tipo) {
-        @Override
-        public String toString() {
-            return tipo + " " + ref;
-        }
-    }
+
 
 
     //buffers para cargar el flujo
@@ -50,16 +45,34 @@ public class GeneradorIR extends MicroCBaseVisitor<String> {
         modulo.append(funciones);
         return modulo.toString();
     }
-    //variables
+    //visitors
     @Override
-    public String visitConstant(MicroCParser.ConstantContext ctx) {
+    public Valor visitStatement(MicroCParser.StatementContext ctx) {
+        String primero = ctx.getChild(0).getText();
+
+        if (primero.equals("return")) {
+            if (ctx.expression() == null) {
+                retornoPorDefecto();
+            } else {
+                Valor v = visit(ctx.expression());
+                v = convertir(v, tipoRetorno);
+                terminar("ret " + v.tipo() + " " + v.ref());
+            }
+            return null;
+        }
+
+        return visitChildren(ctx);
+    }
+
+    @Override
+    public Valor visitConstant(MicroCParser.ConstantContext ctx) {
         String texto = ctx.getText();   // "5", "0xFF", "'a'", or "\"hola\""
         String ref;
         String type;
 
         if (ctx.numeric_constant() != null) {
             int valor;
-            if (texto.startsWith("0x") || texto.startsWith("0X")) {
+            if (texto.toLowerCase().startsWith("0x")) {
                 valor = Integer.parseInt(texto.substring(2), 16);
             } else {
                 valor = Integer.parseInt(texto);
@@ -73,14 +86,13 @@ public class GeneradorIR extends MicroCBaseVisitor<String> {
             type = "i8";
 
         } else {
-            // String: goes in the strings pool (Phase 5)
-            throw new UnsupportedOperationException("String constants: Phase 5");
+            throw new UnsupportedOperationException("Constantes string: Fase 5");
         }
 
-        return new Valor(ref, type).toString();
+        return new Valor(ref, type);
     }
     @Override
-    public String visitVariable_declaration(MicroCParser.Variable_declarationContext ctx){
+    public Valor visitVariable_declaration(MicroCParser.Variable_declarationContext ctx){
         String type = ctx.type().getText();
         List<String> identifiers = new ArrayList<>();
 
@@ -94,7 +106,7 @@ public class GeneradorIR extends MicroCBaseVisitor<String> {
                 Valor act = new Valor(ptr,tipo);
                 varsLocales.put(nombre, act);
             } else {
-                globales.append("@" + nombre + " = global" + tipo  + " 0\n");
+                globales.append("@" + nombre + " = global " + tipo  + " 0\n");
                 Valor act = new Valor("@"+nombre,tipo);
                 varsGlobales.put(nombre, act);
             }
@@ -109,10 +121,9 @@ public class GeneradorIR extends MicroCBaseVisitor<String> {
         out.add(lista.identifier().getText());
     }
 
-
-    //Funciones
     @Override
-    public String  visitFunction_definition(MicroCParser.Function_definitionContext ctx){
+    public Valor  visitFunction_definition(MicroCParser.Function_definitionContext ctx){
+        varsLocales.clear();
         dentroDeFuncion = true;
         var header = ctx.function_def_header();
         String nombre = header.identifier().getText();
@@ -143,6 +154,8 @@ public class GeneradorIR extends MicroCBaseVisitor<String> {
         return null;
 
     }
+
+    //helpers
     private void juntarParametros(MicroCParser.Parameter_def_listContext lista, List<String> out) {
         if (lista.parameter_def_list() != null) {
             juntarParametros(lista.parameter_def_list(), out);
@@ -157,7 +170,22 @@ public class GeneradorIR extends MicroCBaseVisitor<String> {
             terminar("ret " + tipoRetorno + " 0");
         }
     }
-    //helpers
+    private Valor convertir(Valor v, String destino) {
+        if (v.tipo().equals(destino)) return v;
+
+        String t = nuevoTemp();
+        if (bits(v.tipo()) < bits(destino)) {
+            String op = v.tipo().equals("i1") ? "zext" : "sext";
+            emitir(t + " = " + op + " " + v.tipo() + " " + v.ref() + " to " + destino);
+        } else {
+            emitir(t + " = trunc " + v.tipo() + " " + v.ref() + " to " + destino);
+        }
+        return new Valor(t, destino);
+    }
+
+    private int bits(String tipo) {
+        return Integer.parseInt(tipo.substring(1));   // "i16" -> 16
+    }
 
     private void emitir(String inst){
         if (terminado)

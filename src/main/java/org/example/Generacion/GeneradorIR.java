@@ -11,7 +11,7 @@ import java.util.Map;
 
 public class GeneradorIR extends MicroCBaseVisitor<Valor> {
     //Data type
-
+    private record Param(String nombre, String tipo) {}
 
 
     //buffers para cargar el flujo
@@ -47,6 +47,73 @@ public class GeneradorIR extends MicroCBaseVisitor<Valor> {
     }
     //visitors
     @Override
+    public Valor visitExpression(MicroCParser.ExpressionContext ctx) {
+        if (ctx.equality_expression().size() == 1) {
+            return visit(ctx.equality_expression(0));
+        }
+        Valor var = buscarVariable(nombreDestino(ctx.equality_expression(0)));
+        Valor v   = visit(ctx.equality_expression(1));
+        v = convertir(v, var.tipo());
+        emitir("store " + v.tipo() + " " + v.ref() + ", ptr " + var.ref());
+        return v;
+    }
+
+    @Override
+    public Valor visitSimple_expression(MicroCParser.Simple_expressionContext ctx) {
+        if (ctx.add_op() == null) return visit(ctx.term());
+
+        Valor izq = visit(ctx.simple_expression());
+        Valor der = visit(ctx.term());
+
+        String op = ctx.add_op().getText().equals("+") ? "add" : "sub";
+        return operar(op, izq, der);
+    }
+
+    @Override
+    public Valor visitTerm(MicroCParser.TermContext ctx) {
+        if (ctx.mul_op() == null) return visit(ctx.factor());
+
+        Valor izq = visit(ctx.term());
+        Valor der = visit(ctx.factor());
+
+        String op = ctx.mul_op().getText().equals("*") ? "mul" : "sdiv";
+        return operar(op, izq, der);
+    }
+
+
+    @Override
+    public Valor visitFactor(MicroCParser.FactorContext ctx) {
+        if (ctx.constant() != null) {
+            return visit(ctx.constant());
+        }
+
+        if(ctx.identifier() != null && ctx.getChildCount()==1){
+            Valor v = buscarVariable(ctx.identifier().getText());
+            String t = nuevoTemp();
+            emitir(t + " = load " + v.tipo() + ", ptr " + v.ref());
+            return new Valor(t, v.tipo());
+        }
+
+        if (ctx.expression() != null) {
+            return visit(ctx.expression());
+        }
+
+        if (ctx.add_op() != null) {
+            Valor v = visit(ctx.factor());
+            if (ctx.add_op().getText().equals("+")){
+                return v;
+            }
+            if (esConstanteLit(v)){
+                short neg = (short) (-Integer.parseInt(v.ref()));
+                return new Valor(String.valueOf(neg), "i16");
+            }
+            return operar("sub", new Valor("0", "i16"), v);
+        }
+
+        return visitChildren(ctx);
+    }
+
+    @Override
     public Valor visitStatement(MicroCParser.StatementContext ctx) {
         String primero = ctx.getChild(0).getText();
 
@@ -66,7 +133,7 @@ public class GeneradorIR extends MicroCBaseVisitor<Valor> {
 
     @Override
     public Valor visitConstant(MicroCParser.ConstantContext ctx) {
-        String texto = ctx.getText();   // "5", "0xFF", "'a'", or "\"hola\""
+        String texto = ctx.getText();
         String ref;
         String type;
 
@@ -86,7 +153,7 @@ public class GeneradorIR extends MicroCBaseVisitor<Valor> {
             type = "i8";
 
         } else {
-            throw new UnsupportedOperationException("Constantes string: Fase 5");
+            throw new UnsupportedOperationException("Constantes string");
         }
 
         return new Valor(ref, type);
@@ -114,15 +181,10 @@ public class GeneradorIR extends MicroCBaseVisitor<Valor> {
         return null;
     }
 
-    private void juntarIdentificadores(MicroCParser.Identifier_listContext lista, List<String> out){
-        if (lista.identifier_list() !=null){
-            juntarIdentificadores(lista.identifier_list(), out);
-        }
-        out.add(lista.identifier().getText());
-    }
+
 
     @Override
-    public Valor  visitFunction_definition(MicroCParser.Function_definitionContext ctx){
+    public Valor visitFunction_definition(MicroCParser.Function_definitionContext ctx){
         varsLocales.clear();
         dentroDeFuncion = true;
         var header = ctx.function_def_header();
@@ -133,16 +195,28 @@ public class GeneradorIR extends MicroCBaseVisitor<Valor> {
         contEtiqueta = 0;
         contTemp = 0;
 
-        List<String> params = new ArrayList<>();
+        List<Param> params = new ArrayList<>();
         if(header.parameters_def().parameter_def_list() !=null){
             juntarParametros(header.parameters_def().parameter_def_list(), params);
         }
 
+        List<String> firma = new ArrayList<>();
+        for(Param p: params){
+            firma.add(p.tipo + " %" + p.nombre + ".arg");
+        }
+
         funciones.append("define ").append(tipoRetorno).append(" @").append(nombre)
-                .append('(').append(String.join(", ", params)).append(") {\n");
+                .append('(').append(String.join(", ", firma)).append(") {\n");
+
         funciones.append("entry:\n");
         terminado = false;
 
+        for(Param p: params){
+            String ptr = "%" + p.nombre +".addr";
+            emitir(ptr +" = alloca " + p.tipo());
+            emitir("store " + p.tipo() + " %" + p.nombre() + ".arg, ptr " + ptr);
+            varsLocales.put(p.nombre(), new Valor(ptr, p.tipo()));
+        }
         visit(ctx.function_body());
 
         if (!terminado) {
@@ -156,11 +230,45 @@ public class GeneradorIR extends MicroCBaseVisitor<Valor> {
     }
 
     //helpers
-    private void juntarParametros(MicroCParser.Parameter_def_listContext lista, List<String> out) {
+    private String nombreDestino(MicroCParser.Equality_expressionContext eq) {
+        MicroCParser.FactorContext f = eq.relational_expression(0)
+                .simple_expression(0)
+                .term()
+                .factor();
+        if (f.identifier() != null && f.getChildCount() == 1) {
+            return f.identifier().getText();
+        }
+        throw new IllegalStateException("El lado izquierdo = no es una variable");
+    }
+
+    private Valor operar(String op, Valor izq, Valor der) {
+        izq = convertir(izq, "i16");
+        der = convertir(der, "i16");
+        String t = nuevoTemp();
+        emitir(t + " = " + op + " i16 " + izq.ref() + ", " + der.ref());
+        return new Valor(t, "i16");
+    }
+
+    private Valor buscarVariable(String nombre){
+        Valor v = varsLocales.get(nombre);
+        if (v == null)
+            v = varsGlobales.get(nombre);
+        if (v == null)
+            throw new IllegalStateException("Variable no declarada: " + nombre);
+        return v;
+    }
+
+    private void juntarIdentificadores(MicroCParser.Identifier_listContext lista, List<String> out){
+        if (lista.identifier_list() !=null){
+            juntarIdentificadores(lista.identifier_list(), out);
+        }
+        out.add(lista.identifier().getText());
+    }
+    private void juntarParametros(MicroCParser.Parameter_def_listContext lista, List<Param> out) {
         if (lista.parameter_def_list() != null) {
             juntarParametros(lista.parameter_def_list(), out);
         }
-        out.add(tipoLLVM(lista.type()) + " %" + lista.identifier().getText());
+        out.add(new Param(lista.identifier().getText(), tipoLLVM(lista.type())));
     }
 
     private void retornoPorDefecto() {
@@ -217,6 +325,9 @@ public class GeneradorIR extends MicroCBaseVisitor<Valor> {
     }
     static String tipoRetornoLLVM(MicroCParser.Return_typeContext  ret){
         return ret.type() == null ? "void" : tipoLLVM(ret.type());
+    }
+    private boolean esConstanteLit(Valor v) {
+        return !v.ref().startsWith("%") && !v.ref().startsWith("@");
     }
 
 }

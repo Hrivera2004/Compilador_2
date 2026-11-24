@@ -8,6 +8,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.ArrayDeque;
+import java.util.Deque;
 
 public class GeneradorIR extends MicroCBaseVisitor<Valor> {
     //Data type
@@ -23,6 +25,9 @@ public class GeneradorIR extends MicroCBaseVisitor<Valor> {
     private final Map<String, Valor> varsLocales  = new HashMap<>();
 
     private final StringBuilder funciones = new StringBuilder(); // define de cada función
+
+    private final Deque<String> destinosBreak = new ArrayDeque<>();
+    private final Deque<String> destinosContinue = new ArrayDeque<>();
 
     //variables del estado de las funciones
     private int contTemp;
@@ -169,6 +174,32 @@ public class GeneradorIR extends MicroCBaseVisitor<Valor> {
 
         if (primero.equals("if") && ctx.statement().size() == 2) {
             return generarIfConElse(ctx);
+        }
+
+        if (primero.equals("while")) {
+            return generarWhile(ctx);
+        }
+
+        if (primero.equals("break")) {
+            if (destinosBreak.isEmpty()) {
+                throw new IllegalStateException(
+                        "break fuera de un while"
+                );
+            }
+
+            terminar("br label %" + destinosBreak.peek());
+            return null;
+        }
+
+        if (primero.equals("continue")) {
+            if (destinosContinue.isEmpty()) {
+                throw new IllegalStateException(
+                        "continue fuera de un while"
+                );
+            }
+
+            terminar("br label %" + destinosContinue.peek());
+            return null;
         }
 
         if (primero.equals("return")) {
@@ -453,6 +484,41 @@ public class GeneradorIR extends MicroCBaseVisitor<Valor> {
 
         if (!terminado) {
             terminar("br label %" + etiquetaFin);
+        }
+
+        abrirBloque(etiquetaFin);
+        return null;
+    }
+
+    private Valor generarWhile(
+            MicroCParser.StatementContext ctx) {
+
+        String etiquetaCondicion = nuevaEtiqueta("while_cond");
+        String etiquetaCuerpo = nuevaEtiqueta("while_body");
+        String etiquetaFin = nuevaEtiqueta("while_fin");
+
+        abrirBloque(etiquetaCondicion);
+
+        Valor condicion = comoCondicion(visit(ctx.expression()));
+
+        terminar("br i1 " + condicion.ref()
+                + ", label %" + etiquetaCuerpo
+                + ", label %" + etiquetaFin);
+
+        abrirBloque(etiquetaCuerpo);
+
+        destinosBreak.push(etiquetaFin);
+        destinosContinue.push(etiquetaCondicion);
+
+        try {
+            visit(ctx.statement(0));
+        } finally {
+            destinosBreak.pop();
+            destinosContinue.pop();
+        }
+
+        if (!terminado) {
+            terminar("br label %" + etiquetaCondicion);
         }
 
         abrirBloque(etiquetaFin);

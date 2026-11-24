@@ -163,6 +163,14 @@ public class GeneradorIR extends MicroCBaseVisitor<Valor> {
     public Valor visitStatement(MicroCParser.StatementContext ctx) {
         String primero = ctx.getChild(0).getText();
 
+        if (primero.equals("if") && ctx.statement().size() == 1) {
+            return generarIfSinElse(ctx);
+        }
+
+        if (primero.equals("if") && ctx.statement().size() == 2) {
+            return generarIfConElse(ctx);
+        }
+
         if (primero.equals("return")) {
             if (ctx.expression() == null) {
                 retornoPorDefecto();
@@ -395,5 +403,59 @@ public class GeneradorIR extends MicroCBaseVisitor<Valor> {
                 + " " + valor.ref() + ", 0");
 
         return new Valor(t, "i1");
+    }
+
+    private Valor generarIfSinElse(
+            MicroCParser.StatementContext ctx) {
+
+        Valor condicion = comoCondicion(visit(ctx.expression()));
+
+        String etiquetaThen = nuevaEtiqueta("if_then");
+        String etiquetaFin = nuevaEtiqueta("if_fin");
+
+        terminar("br i1 " + condicion.ref()
+                + ", label %" + etiquetaThen
+                + ", label %" + etiquetaFin);
+
+        abrirBloque(etiquetaThen);
+        visit(ctx.statement(0));
+
+        if (!terminado) {
+            terminar("br label %" + etiquetaFin);
+        }
+
+        abrirBloque(etiquetaFin);
+        return null;
+    }
+
+    private Valor generarIfConElse(
+            MicroCParser.StatementContext ctx) {
+
+        Valor condicion = comoCondicion(visit(ctx.expression()));
+
+        String etiquetaThen = nuevaEtiqueta("if_then");
+        String etiquetaElse = nuevaEtiqueta("if_else");
+        String etiquetaFin = nuevaEtiqueta("if_fin");
+
+        terminar("br i1 " + condicion.ref()
+                + ", label %" + etiquetaThen
+                + ", label %" + etiquetaElse);
+
+        abrirBloque(etiquetaThen);
+        visit(ctx.statement(0));
+
+        if (!terminado) {
+            terminar("br label %" + etiquetaFin);
+        }
+
+        abrirBloque(etiquetaElse);
+        visit(ctx.statement(1));
+
+        if (!terminado) {
+            terminar("br label %" + etiquetaFin);
+        }
+
+        abrirBloque(etiquetaFin);
+        return null;
     }
 }

@@ -24,7 +24,7 @@ public class GeneradorIR extends MicroCBaseVisitor<Valor> {
 
     private final StringBuilder funciones = new StringBuilder(); // define de cada función
 
-    //cariables del estado de las funciones
+    //variables del estado de las funciones
     private int contTemp;
     private int contEtiqueta;
     private boolean terminado;
@@ -67,6 +67,52 @@ public class GeneradorIR extends MicroCBaseVisitor<Valor> {
 
         String op = ctx.add_op().getText().equals("+") ? "add" : "sub";
         return operar(op, izq, der);
+    }
+
+    @Override
+    public Valor visitRelational_expression(
+            MicroCParser.Relational_expressionContext ctx) {
+
+        if (ctx.rel_op() == null) {
+            return visit(ctx.simple_expression(0));
+        }
+
+        Valor izq = visit(ctx.simple_expression(0));
+        Valor der = visit(ctx.simple_expression(1));
+
+        String op = switch (ctx.rel_op().getText()) {
+            case "<"  -> "slt";
+            case "<=" -> "sle";
+            case ">"  -> "sgt";
+            case ">=" -> "sge";
+            default -> throw new IllegalStateException(
+                    "Operador relacional desconocido"
+            );
+        };
+
+        return comparar(op, izq, der);
+    }
+
+    @Override
+    public Valor visitEquality_expression(
+            MicroCParser.Equality_expressionContext ctx) {
+
+        if (ctx.eq_op() == null) {
+            return visit(ctx.relational_expression(0));
+        }
+
+        Valor izq = visit(ctx.relational_expression(0));
+        Valor der = visit(ctx.relational_expression(1));
+
+        String op = switch (ctx.eq_op().getText()) {
+            case "==" -> "eq";
+            case "!=" -> "ne";
+            default -> throw new IllegalStateException(
+                    "Operador de igualdad desconocido"
+            );
+        };
+
+        return comparar(op, izq, der);
     }
 
     @Override
@@ -330,4 +376,24 @@ public class GeneradorIR extends MicroCBaseVisitor<Valor> {
         return !v.ref().startsWith("%") && !v.ref().startsWith("@");
     }
 
+    private Valor comparar(String op, Valor izq, Valor der) {
+        izq = convertir(izq, "i16");
+        der = convertir(der, "i16");
+        String t = nuevoTemp();
+        emitir(t + " = icmp " + op + " i16 " + izq.ref() + ", " + der.ref());
+        return new Valor(t, "i1");
+    }
+
+    private Valor comoCondicion(Valor valor) {
+        if (valor.tipo().equals("i1")) {
+            return valor;
+        }
+
+        String t = nuevoTemp();
+
+        emitir(t + " = icmp ne " + valor.tipo()
+                + " " + valor.ref() + ", 0");
+
+        return new Valor(t, "i1");
+    }
 }

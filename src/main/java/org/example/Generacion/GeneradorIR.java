@@ -1,20 +1,25 @@
 package org.example.Generacion;
 
 import org.antlr.v4.runtime.tree.ParseTree;
+import org.example.TablaSymbolos.Simbolo;
+import org.example.TablaSymbolos.TablaSimbolos;
 import org.example.parser.MicroCBaseVisitor;
 import org.example.parser.MicroCParser;
+import org.example.enums.Tipo;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.ArrayDeque;
-import java.util.Deque;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.*;
 
 public class GeneradorIR extends MicroCBaseVisitor<Valor> {
     //Data type
     private record Param(String nombre, String tipo) {}
+    private final TablaSimbolos tabla;
+    private final Set<String> funcionesDefinidas = new HashSet<>();
 
+    public GeneradorIR(TablaSimbolos tabla) {
+        this.tabla = tabla;
+    }
 
     //buffers para cargar el flujo
     private final StringBuilder declaraciones = new StringBuilder(); // declaraciones
@@ -24,12 +29,12 @@ public class GeneradorIR extends MicroCBaseVisitor<Valor> {
     private final Map<String, Valor> varsGlobales = new HashMap<>();
     private final Map<String, Valor> varsLocales  = new HashMap<>();
 
-    private final StringBuilder funciones = new StringBuilder(); // define de cada función
+    private final StringBuilder Bufferfunciones = new StringBuilder(); // define de cada función
 
     private final Deque<String> destinosBreak = new ArrayDeque<>();
     private final Deque<String> destinosContinue = new ArrayDeque<>();
 
-    //variables del estado de las funciones
+    //variables del estado de las Bufferfunciones
     private int contTemp;
     private int contEtiqueta;
     private boolean terminado;
@@ -40,6 +45,7 @@ public class GeneradorIR extends MicroCBaseVisitor<Valor> {
     //Metodo principal
     public String generar(ParseTree arbol) {
         visit(arbol);
+        emitirDeclaresExternos();
 
         StringBuilder modulo = new StringBuilder("; Micro-C\n\n");
         for (StringBuilder seccion : List.of(declaraciones, strings, globales)) {
@@ -47,10 +53,15 @@ public class GeneradorIR extends MicroCBaseVisitor<Valor> {
                 modulo.append(seccion).append('\n');
             }
         }
-        modulo.append(funciones);
+        modulo.append(Bufferfunciones);
         return modulo.toString();
     }
     //visitors
+    @Override
+    public Valor visitFunction_declaration(MicroCParser.Function_declarationContext ctx) {
+        return null;
+    }
+
     @Override
     public Valor visitExpression(MicroCParser.ExpressionContext ctx) {
         if (ctx.equality_expression().size() == 1) {
@@ -143,6 +154,9 @@ public class GeneradorIR extends MicroCBaseVisitor<Valor> {
             String t = nuevoTemp();
             emitir(t + " = load " + v.tipo() + ", ptr " + v.ref());
             return new Valor(t, v.tipo());
+        }
+        if (ctx.identifier() != null) {
+            return generarLlamada(ctx);
         }
 
         if (ctx.expression() != null) {
@@ -250,7 +264,7 @@ public class GeneradorIR extends MicroCBaseVisitor<Valor> {
 
         juntarIdentificadores(ctx.identifier_list(), identifiers);
 
-        String tipo = type.equals("char") ? "i8" : "i16";
+        String tipo = tipoLLVM(ctx.type());
         for (String nombre : identifiers){
             if(dentroDeFuncion){
                 String ptr = "%" + nombre + ".addr";
@@ -275,7 +289,7 @@ public class GeneradorIR extends MicroCBaseVisitor<Valor> {
         var header = ctx.function_def_header();
         String nombre = header.identifier().getText();
         //main siempre es i32 : sino se retorna el tipo del header
-        tipoRetorno = (nombre.equals("main")) ? "i32":tipoRetornoLLVM(header.return_type());
+        tipoRetorno = retornoLLVM(tabla.funciones().get(nombre));
 
         contEtiqueta = 0;
         contTemp = 0;
@@ -284,16 +298,16 @@ public class GeneradorIR extends MicroCBaseVisitor<Valor> {
         if(header.parameters_def().parameter_def_list() !=null){
             juntarParametros(header.parameters_def().parameter_def_list(), params);
         }
-
+        funcionesDefinidas.add(nombre);
         List<String> firma = new ArrayList<>();
         for(Param p: params){
             firma.add(p.tipo + " %" + p.nombre + ".arg");
         }
 
-        funciones.append("define ").append(tipoRetorno).append(" @").append(nombre)
+        Bufferfunciones.append("define ").append(tipoRetorno).append(" @").append(nombre)
                 .append('(').append(String.join(", ", firma)).append(") {\n");
 
-        funciones.append("entry:\n");
+        Bufferfunciones.append("entry:\n");
         terminado = false;
 
         for(Param p: params){
@@ -308,13 +322,108 @@ public class GeneradorIR extends MicroCBaseVisitor<Valor> {
             retornoPorDefecto();
         }
 
-        funciones.append("}\n\n");
+        Bufferfunciones.append("}\n\n");
         dentroDeFuncion = false;
         return null;
 
     }
 
     //helpers
+    private Valor generarLlamada(MicroCParser.FactorContext ctx) {
+        String nombre = ctx.identifier().getText();
+        if (esPredefinida(nombre)) {
+            throw new UnsupportedOperationException(
+                    nombre + " todavía no se traduce (fase 5: runtime)");
+        }
+        Simbolo f = tabla.funciones().get(nombre);
+        if (f == null) {
+            throw new IllegalStateException("Función sin firma en la tabla: " + nombre);
+        }
+        String retorno = retornoLLVM(f);
+        List<String> params = paramsLLVM(f);
+
+        List<MicroCParser.ExpressionContext> exprs = new ArrayList<>();
+        juntarArgumentos(ctx.expression_list(), exprs);
+
+        // Se evalúan en orden; cada argumento se ajusta al tipo del parámetro
+        // (p. ej. una comparación i1 se extiende a i16)
+        List<String> args = new ArrayList<>();
+        for (int i = 0; i < exprs.size(); i++) {
+            Valor v = visit(exprs.get(i));
+            String destino = (i < params.size()) ? params.get(i) : promocionVariadica(v);
+            v = convertir(v, destino);
+            args.add(v.tipo() + " " + v.ref());
+        }
+
+
+        String tipoCall = retorno;
+        if (f.variadica()) {
+            tipoCall += " (" + String.join(", ", params) + ", ...)";
+        }
+        String llamada = "call " + tipoCall + " @" + nombre + "(" + String.join(", ", args) + ")";
+
+        if (retorno.equals("void")) {
+            emitir(llamada);
+            return null;
+        }
+        String t = nuevoTemp();
+        emitir(t + " = " + llamada);
+        return new Valor(t, retorno);
+    }
+    private void juntarArgumentos(MicroCParser.Expression_listContext lista, List<MicroCParser.ExpressionContext> out) {
+        if (lista == null) {
+            return;
+        }
+        juntarArgumentos(lista.expression_list(), out);
+        out.add(lista.expression());
+    }
+    private static boolean esPredefinida(String nombre) {
+        return nombre.equals("printf") || nombre.equals("scanf");
+    }
+
+    private void emitirDeclaresExternos() {
+        for (Simbolo f : tabla.funciones().values()) {
+            if (esPredefinida(f.nombre()) || funcionesDefinidas.contains(f.nombre())) {
+                continue;
+            }
+            List<String> params = paramsLLVM(f);
+            if (f.variadica()) {
+                params.add("...");
+            }
+            declaraciones.append("declare ").append(retornoLLVM(f))
+                    .append(" @").append(f.nombre())
+                    .append('(').append(String.join(", ", params)).append(")\n");
+        }
+    }
+
+    private static String llvmtipo(Tipo t) {
+        return switch (t) {
+            case Entero -> "i16";
+            case Caracter -> "i8";
+            case Cadena -> "ptr";
+            case Void -> "void";
+            case Error -> throw new IllegalStateException("Tipo Error en el generador");
+        };
+    }
+    private static String retornoLLVM(Simbolo f) {
+        if (f.nombre().equals("main")){
+            return "i32";
+        }
+        return llvmtipo(f.tipo());
+    }
+
+    private static List<String> paramsLLVM(Simbolo f) {
+        List<String> tipos = new ArrayList<>();
+        for (Tipo t : f.tiposParametros()) {
+            tipos.add(llvmtipo(t));
+        }
+        return tipos;
+    }
+
+    private static String promocionVariadica(Valor v) {
+        return v.tipo().equals("ptr") ? "ptr" : "i32";
+    }
+
     private String nombreDestino(MicroCParser.Equality_expressionContext eq) {
         MicroCParser.FactorContext f = eq.relational_expression(0)
                 .simple_expression(0)
@@ -383,7 +492,7 @@ public class GeneradorIR extends MicroCBaseVisitor<Valor> {
     private void emitir(String inst){
         if (terminado)
             abrirBloque(nuevaEtiqueta("muerto"));
-        funciones.append(" ").append(inst).append("\n");
+        Bufferfunciones.append(" ").append(inst).append("\n");
 
     }
 
@@ -394,8 +503,8 @@ public class GeneradorIR extends MicroCBaseVisitor<Valor> {
 
     private void abrirBloque(String etq){
         if(!terminado)
-            funciones.append("br label %").append(etq).append("\n");
-        funciones.append(etq).append(":\n");
+            Bufferfunciones.append("br label %").append(etq).append("\n");
+        Bufferfunciones.append(etq).append(":\n");
         terminado = false;
     }
     private String nuevoTemp(){
@@ -407,9 +516,6 @@ public class GeneradorIR extends MicroCBaseVisitor<Valor> {
 
     static String tipoLLVM(MicroCParser.TypeContext tipo){
         return tipo.getText().equals("char") ? "i8" : "i16";
-    }
-    static String tipoRetornoLLVM(MicroCParser.Return_typeContext  ret){
-        return ret.type() == null ? "void" : tipoLLVM(ret.type());
     }
     private boolean esConstanteLit(Valor v) {
         return !v.ref().startsWith("%") && !v.ref().startsWith("@");

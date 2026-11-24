@@ -4,9 +4,12 @@ import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 
 public class TablaSimbolos {
     private final Deque<Map<String, Simbolo>> ambitos = new ArrayDeque<>();
+    private final Map<String, Simbolo> funciones = new LinkedHashMap<>();
 
     public TablaSimbolos(){
         entrarAmbito();
@@ -32,7 +35,14 @@ public class TablaSimbolos {
         }
 
         actual.put(simbolo.nombre(), simbolo);
+        if (simbolo.esFuncion()) {
+            funciones.putIfAbsent(simbolo.nombre(), simbolo);
+        }
         return true;
+    }
+
+    public Map<String, Simbolo> funciones() {
+        return Collections.unmodifiableMap(funciones);
     }
 
     // Busca desde el ámbito más interno hacia el global

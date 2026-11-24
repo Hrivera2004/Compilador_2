@@ -32,6 +32,10 @@ public class Semantico extends MicroCBaseVisitor<Void> {
                 List.of(Tipo.Cadena), null, false));
     }
 
+    public TablaSimbolos getTabla() {
+        return tabla;
+    }
+
     @Override
     public Void visitFunction_definition(MicroCParser.Function_definitionContext ctx ){
         registrarFuncion(

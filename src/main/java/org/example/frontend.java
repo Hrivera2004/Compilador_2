@@ -133,16 +133,20 @@ public class frontend extends JFrame {
 
         ParseTree tree = parser.program();
         new CheckLexer().visit(tree);
-        new Semantico().visit(tree);
-
+        Semantico s = new Semantico();
+        s.visit(tree);
         System.out.println("Sin errores léxicos, sintácticos ni semánticos.");
         System.out.println(tree.toStringTree(parser));
         System.out.println(codigo);
 
-         String ir = new GeneradorIR().generar(tree);
+        String ir = new GeneradorIR(s.getTabla()).generar(tree);
         System.out.println(ir);
 
-        System.out.println("\n-> Terminado");
+        String base = archivo.getName().replaceFirst("\\.[^.]+$", "");
+        File salida = new File(archivo.getParentFile(), base + ".ll");
+        Files.deleteIfExists(salida.toPath());
+        Files.writeString(salida.toPath(), ir, StandardCharsets.UTF_8);
+        System.out.println("IR guardado en " + salida.getAbsolutePath());
     }
 
     /** Manda System.out y System.err al JTextArea (y también a la terminal). */

@@ -25,6 +25,9 @@ public class GeneradorIR extends MicroCBaseVisitor<Valor> {
     private final StringBuilder declaraciones = new StringBuilder(); // declaraciones
     private final StringBuilder strings = new StringBuilder(); // constantes de string
 
+    private final Map<String, Valor> poolStrings = new LinkedHashMap<>();
+    private int contadorStrings;
+
     private final StringBuilder globales = new StringBuilder(); // variables globales
     private final Map<String, Valor> varsGlobales = new HashMap<>();
     private final Map<String, Valor> varsLocales  = new HashMap<>();
@@ -45,6 +48,7 @@ public class GeneradorIR extends MicroCBaseVisitor<Valor> {
     //Metodo principal
     public String generar(ParseTree arbol) {
         visit(arbol);
+        emitirDeclaresRuntime();
         emitirDeclaresExternos();
 
         StringBuilder modulo = new StringBuilder("; Micro-C\n\n");
@@ -252,7 +256,7 @@ public class GeneradorIR extends MicroCBaseVisitor<Valor> {
             type = "i8";
 
         } else {
-            throw new UnsupportedOperationException("Constantes string");
+            return registrarCadena(texto);
         }
 
         return new Valor(ref, type);
@@ -288,7 +292,6 @@ public class GeneradorIR extends MicroCBaseVisitor<Valor> {
         dentroDeFuncion = true;
         var header = ctx.function_def_header();
         String nombre = header.identifier().getText();
-        //main siempre es i32 : sino se retorna el tipo del header
         tipoRetorno = retornoLLVM(tabla.funciones().get(nombre));
 
         contEtiqueta = 0;
@@ -329,12 +332,71 @@ public class GeneradorIR extends MicroCBaseVisitor<Valor> {
     }
 
     //helpers
+    private Valor registrarCadena(String literal) {
+        Valor existente = poolStrings.get(literal);
+
+        if (existente != null) {
+            return existente;
+        }
+
+        StringBuilder bytesLLVM = new StringBuilder();
+        int longitud = 0;
+
+        for (int i = 1; i < literal.length() - 1; i++) {
+            char caracter = literal.charAt(i);
+
+            if (caracter == '\\') {
+                char escape = literal.charAt(++i);
+
+                switch (escape) {
+                    case 'n' -> bytesLLVM.append("\\0A");
+                    case '\\' -> bytesLLVM.append("\\5C");
+                    case '"' -> bytesLLVM.append("\\22");
+                    default -> throw new IllegalStateException(
+                            "Escape de string no soportado: \\" + escape
+                    );
+                }
+
+                longitud++;
+                continue;
+            }
+
+            if (caracter >= 32 && caracter <= 126
+                    && caracter != '"' && caracter != '\\') {
+                bytesLLVM.append(caracter);
+            } else {
+                bytesLLVM.append(String.format(
+                        "\\%02X", (int) caracter & 0xFF
+                ));
+            }
+
+            longitud++;
+        }
+
+        String referencia = "@.str" + contadorStrings++;
+        strings.append(referencia)
+                .append(" = private unnamed_addr constant [")
+                .append(longitud + 1)
+                .append(" x i8] c\"")
+                .append(bytesLLVM)
+                .append("\\00\"\n");
+
+        Valor valor = new Valor(referencia, "ptr");
+        poolStrings.put(literal, valor);
+
+        return valor;
+    }
+
     private Valor generarLlamada(MicroCParser.FactorContext ctx) {
         String nombre = ctx.identifier().getText();
-        if (esPredefinida(nombre)) {
-            throw new UnsupportedOperationException(
-                    nombre + " todavía no se traduce (fase 5: runtime)");
+        if (nombre.equals("printf")) {
+            return generarPrintf(ctx);
         }
+
+        if (nombre.equals("scanf")) {
+            return generarScanf(ctx);
+        }
+
         Simbolo f = tabla.funciones().get(nombre);
         if (f == null) {
             throw new IllegalStateException("Función sin firma en la tabla: " + nombre);
@@ -370,6 +432,76 @@ public class GeneradorIR extends MicroCBaseVisitor<Valor> {
         emitir(t + " = " + llamada);
         return new Valor(t, retorno);
     }
+
+    private Valor generarPrintf(MicroCParser.FactorContext ctx) {
+        List<MicroCParser.ExpressionContext> argumentos = new ArrayList<>();
+        juntarArgumentos(ctx.expression_list(), argumentos);
+
+        Valor formato = visit(argumentos.getFirst());
+
+        if (!formato.tipo().equals("ptr")) {
+            throw new IllegalStateException(
+                    "printf esperaba un formato de tipo string"
+            );
+        }
+
+        if (argumentos.size() == 1) {
+            emitir("call void @microc_printf_text(ptr " + formato.ref() + ")");
+            return null;
+        }
+
+        Valor valor = visit(argumentos.get(1));
+
+        switch (valor.tipo()) {
+            case "i16" -> emitir(
+                    "call void @microc_printf_i16(ptr " + formato.ref()
+                            + ", i16 " + valor.ref() + ")"
+            );
+            case "i8" -> emitir(
+                    "call void @microc_printf_i8(ptr " + formato.ref()
+                            + ", i8 " + valor.ref() + ")"
+            );
+            default -> throw new IllegalStateException(
+                    "printf recibió un tipo no imprimible: " + valor.tipo()
+            );
+        }
+
+        return null;
+    }
+
+
+    private Valor generarScanf(MicroCParser.FactorContext ctx) {
+        List<MicroCParser.ExpressionContext> argumentos = new ArrayList<>();
+        juntarArgumentos(ctx.expression_list(), argumentos);
+
+        Valor formato = visit(argumentos.getFirst());
+
+        if (!formato.tipo().equals("ptr")) {
+            throw new IllegalStateException(
+                    "scanf esperaba un formato de tipo string"
+            );
+        }
+
+        String textoFormato = argumentos.getFirst().getText();
+        String temporal = nuevoTemp();
+
+        if (textoFormato.equals("\"%d\"")) {
+            emitir(temporal + " = call i16 @microc_scan_i16(ptr "
+                    + formato.ref() + ")");
+            return new Valor(temporal, "i16");
+        }
+
+        if (textoFormato.equals("\"%c\"")) {
+            emitir(temporal + " = call i8 @microc_scan_i8(ptr "
+                    + formato.ref() + ")");
+            return new Valor(temporal, "i8");
+        }
+
+        throw new IllegalStateException(
+                "Formato de scanf no soportado: " + textoFormato
+        );
+    }
+
     private void juntarArgumentos(MicroCParser.Expression_listContext lista, List<MicroCParser.ExpressionContext> out) {
         if (lista == null) {
             return;
@@ -379,6 +511,14 @@ public class GeneradorIR extends MicroCBaseVisitor<Valor> {
     }
     private static boolean esPredefinida(String nombre) {
         return nombre.equals("printf") || nombre.equals("scanf");
+    }
+
+    private void emitirDeclaresRuntime() {
+        declaraciones.append("declare void @microc_printf_text(ptr)\n");
+        declaraciones.append("declare void @microc_printf_i16(ptr, i16)\n");
+        declaraciones.append("declare void @microc_printf_i8(ptr, i8)\n");
+        declaraciones.append("declare i16 @microc_scan_i16(ptr)\n");
+        declaraciones.append("declare i8 @microc_scan_i8(ptr)\n");
     }
 
     private void emitirDeclaresExternos() {

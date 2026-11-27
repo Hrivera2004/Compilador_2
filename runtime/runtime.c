@@ -3,14 +3,17 @@
 
 void microc_printf_text(const char *formato) {
     printf(formato);
+    fflush(stdout);
 }
 
 void microc_printf_i16(const char *formato, int16_t valor) {
     printf(formato, (int) valor);
+    fflush(stdout);
 }
 
 void microc_printf_i8(const char *formato, int8_t valor) {
     printf(formato, (int) valor);
+    fflush(stdout);
 }
 
 int16_t microc_scan_i16(const char *formato) {

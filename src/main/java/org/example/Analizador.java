@@ -14,7 +14,7 @@ public class Analizador {
             @Override public void syntaxError(Recognizer<?,?> r, Object tok, int linea,
                                               int col, String msg, RecognitionException e) {
                 throw new ErrorSemantico("Error sintáctico en línea " + linea
-                        + ", columna " + (col + 1) + ": " + msg);
+                        + ", columna " + (col + 1) + ": " + msg, linea, col + 1);
             }
         };
         try {

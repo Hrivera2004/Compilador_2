@@ -21,6 +21,6 @@ public class EscuchaErrores extends BaseErrorListener {
                     : "Error sintáctico en línea " + line + ", columna " + columna + ": token inesperado '" + token.getText() + "'";
         }
 
-        throw new ErrorCompilacion(errorMsg);
+        throw new ErrorCompilacion(errorMsg, line, columna);
     }
 }

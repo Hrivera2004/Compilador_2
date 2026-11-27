@@ -58,6 +58,7 @@ public class CheckLexer extends MicroCBaseVisitor<Void> {
 
     private void error(Token t, String mensaje) {
         throw new ErrorSemantico("Error léxico en línea " + t.getLine()
-                + ", columna " + (t.getCharPositionInLine() + 1) + ": " + mensaje);
+                + ", columna " + (t.getCharPositionInLine() + 1) + ": " + mensaje,
+                t.getLine(), t.getCharPositionInLine() + 1);
     }
 }

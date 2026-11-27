@@ -115,7 +115,8 @@ public class Semantico extends MicroCBaseVisitor<Void> {
         throw new ErrorSemantico(
                 "Error semántico en línea " + token.getLine()
                         + ", columna " + (token.getCharPositionInLine() + 1)
-                        + ": " + mensaje
+                        + ": " + mensaje,
+                token.getLine(), token.getCharPositionInLine() + 1
         );
     }
 

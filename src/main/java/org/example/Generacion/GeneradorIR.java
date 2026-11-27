@@ -452,6 +452,11 @@ public class GeneradorIR extends MicroCBaseVisitor<Valor> {
 
         Valor valor = visit(argumentos.get(1));
 
+        // ayuda a que i1 pueda caer dentro del switch
+        if (valor.tipo().equals("i1")) {
+            valor = convertir(valor, "i16");
+        }
+
         switch (valor.tipo()) {
             case "i16" -> emitir(
                     "call void @microc_printf_i16(ptr " + formato.ref()
